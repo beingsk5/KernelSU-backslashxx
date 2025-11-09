@@ -1,7 +1,13 @@
+#include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+#include <linux/sched/signal.h> // signal_struct
+#include <linux/sched/task.h>
+#else
+#include <linux/sched.h>
+#endif
 #include <linux/seccomp.h>
 #include <linux/thread_info.h>
 #include <linux/uidgid.h>
@@ -13,6 +19,7 @@
 #include "selinux/selinux.h"
 #include "su_mount_ns.h"
 #include "sucompat.h"
+#include "kernel_compat.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 7, 0)
 static struct group_info root_groups = { .usage = REFCOUNT_INIT(2) };
@@ -52,7 +59,11 @@ static void setup_groups(struct root_profile *profile, struct cred *cred)
 			put_group_info(group_info);
 			return;
 		}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
 		group_info->gid[i] = kgid;
+#else
+		GROUP_AT(group_info, i) = kgid;
+#endif
 	}
 
 	groups_sort(group_info);
@@ -74,8 +85,9 @@ static void disable_seccomp()
 #ifdef CONFIG_SECCOMP
 	current->seccomp.mode = 0;
 	current->seccomp.filter = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	atomic_set(&current->seccomp.filter_count, 0);
-#else
+#endif
 #endif
 }
 
