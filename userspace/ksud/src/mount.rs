@@ -63,18 +63,7 @@ pub fn mount_ext4(source: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<
         .attach(source)
         .with_context(|| "Failed to attach loop")?;
     let lo = new_loopback.path().ok_or(anyhow!("no loop"))?;
-    let fs = fsopen("ext4", FsOpenFlags::FSOPEN_CLOEXEC)?;
-    let fs = fs.as_fd();
-    fsconfig_set_string(fs, "source", lo)?;
-    fsconfig_create(fs)?;
-    let mount = fsmount(fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
-    move_mount(
-        mount.as_fd(),
-        "",
-        CWD,
-        target.as_ref(),
-        MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
-    )?;
+    mount(lo, target.as_ref(), "ext4", MountFlags::empty(), "")?;
     Ok(())
 }
 
@@ -114,40 +103,12 @@ pub fn mount_overlayfs(
         .filter(|wd| wd.exists())
         .map(|e| e.display().to_string());
 
-    let result = (|| {
-        let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
-        let fs = fs.as_fd();
-        fsconfig_set_string(fs, "lowerdir", &lowerdir_config)?;
-        if let (Some(upperdir), Some(workdir)) = (&upperdir, &workdir) {
-            fsconfig_set_string(fs, "upperdir", upperdir)?;
-            fsconfig_set_string(fs, "workdir", workdir)?;
-        }
-        fsconfig_set_string(fs, "source", KSU_OVERLAY_SOURCE)?;
-        fsconfig_create(fs)?;
-        let mount = fsmount(fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
-        move_mount(
-            mount.as_fd(),
-            "",
-            CWD,
-            dest.as_ref(),
-            MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
-        )
-    })();
+    let mut data = format!("lowerdir={lowerdir_config}");
+    if let (Some(upperdir), Some(workdir)) = (upperdir, workdir) {
+       data = format!("{data},upperdir={upperdir},workdir={workdir}");
+     }
+    mount(KSU_OVERLAY_SOURCE, dest.as_ref(), "overlay", MountFlags::empty(), &data)?;
 
-    if let Err(e) = result {
-        warn!("fsopen mount failed: {e:#}, fallback to mount");
-        let mut data = format!("lowerdir={lowerdir_config}");
-        if let (Some(upperdir), Some(workdir)) = (upperdir, workdir) {
-            data = format!("{data},upperdir={upperdir},workdir={workdir}");
-        }
-        mount(
-            KSU_OVERLAY_SOURCE,
-            dest.as_ref(),
-            "overlay",
-            MountFlags::empty(),
-            data,
-        )?;
-    }
     Ok(())
 }
 
@@ -158,20 +119,7 @@ pub fn bind_mount(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
         from.as_ref().display(),
         to.as_ref().display()
     );
-    let tree = open_tree(
-        CWD,
-        from.as_ref(),
-        OpenTreeFlags::OPEN_TREE_CLOEXEC
-            | OpenTreeFlags::OPEN_TREE_CLONE
-            | OpenTreeFlags::AT_RECURSIVE,
-    )?;
-    move_mount(
-        tree.as_fd(),
-        "",
-        CWD,
-        to.as_ref(),
-        MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
-    )?;
+    mount(from.as_ref(), to.as_ref(), "", MountFlags::BIND | MountFlags::REC, "")?;
     Ok(())
 }
 
