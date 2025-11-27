@@ -125,7 +125,7 @@ $(info -- KernelSU/compat: file_inode() found)
 ccflags-y += -DKSU_UL_HAS_FILE_INODE
 endif
 
-ccflags-y += -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
-ccflags-y += -Wno-declaration-after-statement -Wno-unused-function
+ccflags-y += -Wno-implicit-function-declaration -Wno-strict-prototypes -Wno-missing-prototypes
+ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-attributes -Wno-int-to-pointer-cast
 
 # Keep a new line here!! Because someone may append config
