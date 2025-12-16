@@ -131,31 +131,35 @@ LSM_HANDLER_TYPE ksu_handle_rename(struct dentry *old_dentry, struct dentry *new
 	return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) || defined(KSU_HAS_PATH_UMOUNT)
-static void ksu_path_umount(const char *mnt, struct path *path, int flags)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
+__weak int path_umount(struct path *path, int flags)
 {
-	int err = path_umount(path, flags);
-	pr_info("path_umount: %s code: %d\n", mnt, err);
-}
-#else
-static void ksu_sys_umount(const char *mnt, int flags)
-{
-	char __user *usermnt = (char __user *)mnt;
+	char buf[256] = {0};
+
+	// -1 on the size as implicit null termination
+	// as we zero init the thing
+	char *realpath = d_path(path, buf, sizeof(buf) - 1);
+	if (!(realpath && realpath != buf))
+		return -ENOENT;
 
 	mm_segment_t old_fs = get_fs();
 	set_fs(KERNEL_DS);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
-	int ret = ksys_umount(usermnt, flags);
-	set_fs(old_fs);
-	pr_info("ksys_umount: %s code: %d \n", mnt, ret);
+	int ret = ksys_umount((char __user *)realpath, flags);
 #else
-	long ret = sys_umount(usermnt, flags); // cuz asmlinkage long sys##name
-	set_fs(old_fs);
-	pr_info("sys_umount: %s code: %d \n", mnt, ret);
+	long ret = sys_umount((char __user *)realpath, flags); // cuz asmlinkage long sys##name
 #endif
-	return;
+
+	set_fs(old_fs);
+
+	// release ref here! user_path_at increases it
+	// then only cleans for itself
+	path_put(path); 
+	return ret;
+
 }
-#endif // KSU_HAS_PATH_UMOUNT
+#endif
 
 static void try_umount(const char *mnt, int flags)
 {
@@ -171,16 +175,8 @@ static void try_umount(const char *mnt, int flags)
 		return;
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) || defined(KSU_HAS_PATH_UMOUNT)
-	ksu_path_umount(mnt, &path, flags);
-	// dont call path_put here!!
-	// path_umount releases ref for us
-#else
-	ksu_sys_umount(mnt, flags);
-	// release ref here! user_path_at increases it
-	// then only cleans for itself
-	path_put(&path);
-#endif
+	err = path_umount(&path, flags);
+	pr_info("path_umount: %s code: %d\n", mnt, err);
 }
 
 static inline void ksu_force_sig(int sig)
