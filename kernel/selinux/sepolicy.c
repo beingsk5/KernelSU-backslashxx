@@ -617,21 +617,25 @@ static bool add_genfscon(struct policydb *db, const char *fs_name,
 	return false;
 }
 
-static void *ksu_realloc(void *old, size_t new_size, size_t old_size)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#define ksu_kvrealloc(p, new_size, _old_size) kvrealloc(p, new_size, GFP_ATOMIC)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+// https://elixir.bootlin.com/linux/v5.15-rc1/source/mm/util.c#L642
+// w/ unsafe_memcpy
+static void *ksu_kvrealloc(const void *p, size_t oldsize, size_t newsize)
 {
-	// we can't use krealloc, because it may be read-only
-	void *new = kzalloc(new_size, GFP_ATOMIC);
-	if (!new) {
+	void *newp;
+
+	if (oldsize >= newsize)
+		return (void *)p;
+	newp = kvmalloc(newsize, GFP_ATOMIC);
+	if (!newp)
 		return NULL;
-	}
-	if (old_size) {
-		memcpy(new, old, old_size);
-	}
-	// we can't use kfree, because it may be read-only
-	// there maybe some leaks, maybe we can check ptr_write, but it's not a big deal
-	// kfree(old);
-	return new;
+	__builtin_memcpy(newp, p, oldsize); // unsafe_memcpy, no fortify_source, no asan
+	kvfree(p);
+	return newp;
 }
+#endif
 
 static bool add_type(struct policydb *db, const char *type_name, bool attr)
 {
@@ -667,7 +671,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 	struct ebitmap *new_type_attr_map_array =
-		ksu_realloc(db->type_attr_map_array,
+		ksu_kvrealloc(db->type_attr_map_array,
 			    value * sizeof(struct ebitmap),
 			    (value - 1) * sizeof(struct ebitmap));
 
@@ -677,7 +681,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
 	}
 
 	struct type_datum **new_type_val_to_struct =
-		ksu_realloc(db->type_val_to_struct,
+		ksu_kvrealloc(db->type_val_to_struct,
 			    sizeof(*db->type_val_to_struct) * value,
 			    sizeof(*db->type_val_to_struct) * (value - 1));
 
@@ -687,7 +691,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
 	}
 
 	char **new_val_to_name_types =
-		ksu_realloc(db->sym_val_to_name[SYM_TYPES],
+		ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES],
 			    sizeof(char *) * value,
 			    sizeof(char *) * (value - 1));
 	if (!new_val_to_name_types) {
