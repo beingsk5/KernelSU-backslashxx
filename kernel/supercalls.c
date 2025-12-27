@@ -152,57 +152,49 @@ static int do_check_safemode(void __user *arg)
     return 0;
 }
 
-static int do_get_allow_list_common(void __user *arg, bool allow)
+static int do_get_allow_list(void __user *arg)
 {
     struct ksu_get_allow_list_cmd cmd;
-    int *arr = NULL;
-    int err = 0;
 
     if (copy_from_user(&cmd, arg, sizeof(cmd))) {
         return -EFAULT;
     }
 
-    if (cmd.count) {
-        arr = kmalloc(sizeof(int) * cmd.count, GFP_KERNEL);
-        if (!arr) {
-            return -ENOMEM;
-        }
-    }
-
-    bool success = ksu_get_allow_list(arr, &cmd.count, &cmd.total_count, allow);
+    bool success = ksu_get_allow_list((int *)cmd.uids, (int *)&cmd.count, true);
 
     if (!success) {
-        err = -EFAULT;
-        goto out;
+        return -EFAULT;
     }
 
     if (copy_to_user(arg, &cmd, sizeof(cmd))) {
-        pr_err("get_allow_list: copy_to_user cmd failed\n");
-        err = -EFAULT;
-        goto out;
+        pr_err("get_allow_list: copy_to_user failed\n");
+        return -EFAULT;
     }
 
-    if (cmd.count && copy_to_user(&((struct ksu_get_allow_list_cmd *)arg)->uids,
-                                  arr, sizeof(int) * cmd.count)) {
-        pr_err("get_allow_list: copy_to_user uids failed\n");
-        err = -EFAULT;
-    }
-
-out:
-    if (arr) {
-        kfree(arr);
-    }
-    return err;
+    return 0;
 }
 
 static int do_get_deny_list(void __user *arg)
 {
-    return do_get_allow_list_common(arg, false);
-}
+    struct ksu_get_allow_list_cmd cmd;
 
-static int do_get_allow_list(void __user *arg)
-{
-    return do_get_allow_list_common(arg, true);
+    if (copy_from_user(&cmd, arg, sizeof(cmd))) {
+        return -EFAULT;
+    }
+
+    bool success =
+        ksu_get_allow_list((int *)cmd.uids, (int *)&cmd.count, false);
+
+    if (!success) {
+        return -EFAULT;
+    }
+
+    if (copy_to_user(arg, &cmd, sizeof(cmd))) {
+        pr_err("get_deny_list: copy_to_user failed\n");
+        return -EFAULT;
+    }
+
+    return 0;
 }
 
 static int do_uid_granted_root(void __user *arg)
@@ -279,19 +271,17 @@ static int do_get_app_profile(void __user *arg)
 static int do_set_app_profile(void __user *arg)
 {
     struct ksu_set_app_profile_cmd cmd;
-    int ret;
 
     if (copy_from_user(&cmd, arg, sizeof(cmd))) {
         pr_err("set_app_profile: copy_from_user failed\n");
         return -EFAULT;
     }
 
-    ret = ksu_set_app_profile(&cmd.profile);
-    if (!ret) {
-        ksu_persistent_allow_list();
-        ksu_mark_running_process();
+    if (!ksu_set_app_profile(&cmd.profile, true)) {
+        return -EFAULT;
     }
-    return ret;
+
+    return 0;
 }
 
 static int do_get_feature(void __user *arg)
